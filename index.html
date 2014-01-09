@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>MADD MAP</title>
+
+<link rel="stylesheet" media="all" href="css/style.css"/>
+
+<body>
+  <div id="content">
+    <div id="header">
+      <h2>Drivers involved in fatal crashes in <span id="year">2011</span></h2>
+      <h3>with a blood alcohol level (BAC) of 0.08% or higher</h3>
+    </div>
+    <div id="controls">
+      <button onclick="updateData(2011);">2011</button>
+      <button onclick="updateData(2010);">2010</button>
+      <button onclick="updateData(2009);">2009</button>
+      <button onclick="updateData(2008);">2008</button>
+    </div>
+
+    <div id="map">
+        <h4 class="loading">Loading...</h4>
+    </div>
+    <div id="legend" class="states">
+        <ul>
+            <li class="q0-4"> 0 - 16% </li>
+            <li class="q1-4"> 16 - 21% </li>
+            <li class="q2-4"> 21 - 27% </li>
+            <li class="q3-4"> 27%+ </li>
+        </ul>
+    </div>
+  </div>
+</body>
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script src="http://d3js.org/queue.v1.min.js"></script>
+<script src="http://d3js.org/topojson.v1.min.js"></script>
+<script>
+
+  var margin = { top: 0, right: 0, bottom: 0, left: 0 },
+      width = 960 - margin.right - margin.left,
+      height = 500,
+      path = d3.geo.path(),
+      map,
+      items,
+      tooltip,
+      states;
+
+  var drunkColumns = ['BAC_08plus_2011', 'BAC_08plus_2010', 'BAC_08plus_2009', 'BAC_08plus_2008'],
+      drinkingColumns = ['BAC_01plus_2011', 'BAC_01plus_2010', 'BAC_01plus_2009', 'BAC_01plus_2008'],
+      totalColumns = ['TOTAL_2011', 'TOTAL_2010', 'TOTAL_2009', 'TOTAL_2008'],
+      currentYear = '2011';
+
+  // Set mapOffset used for positioning tooltip
+  var mapOffset = {
+    left: 20, //20,
+    top: 0 //30
+  };
+
+  var quantize = d3.scale.threshold()
+    .domain([.16, .21, .27])
+    .range(d3.range(4).map(function(i) { return "q" + i + "-4"; }));
+
+  var color = d3.scale.threshold()
+    .domain([.16, .21, .27])
+    .range(['#fef0d9', '#fdcc8a','#fc8d59', '#d7301f']);
+
+
+  var q = queue()
+  .defer(d3.json, "data/us.json")
+  .defer(d3.csv,"data/us-states-drunkdrivers.csv")
+  .await(ready);
+
+  function ready(error, us, drivers) {
+      window.error = error;
+      if (error) throw error;
+
+      d3.select('.loading').remove();
+      tooltip = d3.select("#map").append("div")
+        .attr("class", "tooltip hidden");
+      
+      map = d3.select('#map').append('svg')
+      .attr('width', width)
+      .attr('height', height);
+
+      /*  Format data  - make one giant object with all the data we need */
+      items = formattedData(drivers);
+ 
+      states = map.append('g')
+          .attr('class', 'states')
+          .selectAll('path')
+          .data(topojson.feature(us, us.objects.states).features)
+          .enter().append('path')
+          .attr("fill", getFill)
+          .attr('d', path);
+
+      //show tooltips
+      states.on("mouseover", showTooltip)
+        .on("mousemove", showTooltip)
+        .on("mouseout",  function(d,i) {
+          tooltip.classed("hidden", true)
+        });    
+
+  };
+
+  /* ****************************** */
+
+  function getClassName(d) {
+    if (items[d.id] == null) {
+      return 'undefined';
+    }
+
+    var colNumber;
+    drunkColumns.forEach(function(col, k) {
+      if(col.slice(-4) == currentYear) {
+        colNumber = k;
+      }
+    });
+
+    return quantize(items[d.id].drunkNums[colNumber] / items[d.id].totalNums[colNumber]) + " ";
+  }
+
+  function getFill(d) {
+    if (items[d.id] == null) {
+      return 'undefined';
+    }
+
+    var colNumber;
+    drunkColumns.forEach(function(col, k) {
+      if(col.slice(-4) == currentYear) {
+        colNumber = k;
+      }
+    });
+
+    return color(items[d.id].drunkNums[colNumber] / items[d.id].totalNums[colNumber]);
+  }
+
+
+  function showTooltip(d,i){
+      var mouse = d3.mouse(map.node()).map( function(d) { return parseInt(d); } );
+
+      var name = items[d.id].name;
+      var text = '';
+      var colNumber;
+
+      drunkColumns.forEach(function(col, k) {
+        if(col.slice(-4) == currentYear) {
+          colNumber = k;
+        }
+      });
+      var percentDrunk = roundTenth((items[d.id].drunkNums[colNumber] / items[d.id].totalNums[colNumber]) * 100);
+      var percentDrinking = roundTenth((items[d.id].drinkingNums[colNumber] / items[d.id].totalNums[colNumber]) * 100);
+
+      if(isNaN(percentDrunk)){
+          text += '<i>Percent drivers with BAC of 0.08+ unknown</i>';
+      }else{
+          text += '<span class="highlight">' + percentDrunk + '%</span> of drivers involved in fatal crashes had a BAC of 0.08+';
+      }
+      text += '<br />';
+
+      if(isNaN(percentDrinking)){
+          text += '<i>Percent drivers drinking unknown</i>';
+      }else{
+          text += '<span class="highlight">' + percentDrinking + '%</span> of drivers involved in fatal crashes were drinking';
+      }
+
+      /* NEXT STEP: Build Chart showing history over the past several years */
+
+      //text += '<p>(insert graph over time here)</p>';
+
+      tooltip
+        .classed("hidden", false)
+        .attr("style", "left:"+(mouse[0]+mapOffset.left) + "px;top:" + (mouse[1]+mapOffset.top) + "px")
+        .html('<div class="tooltip_title ' + getClassName(d) + '">' + name + ', ' + currentYear + '</div> ' + text)
+  } 
+
+
+  function formattedData(drivers) {
+    var items = [];
+
+    drivers.forEach(function(d, i) {
+      var row = drivers[i],
+          id = row['ID'], 
+          drunkNums = [],
+          drinkingNums = [],
+          totalNums = [];
+
+      drunkColumns.forEach(function(col, k) {
+        var datum = parseFloat(row[col]);
+        drunkNums.push(datum);
+      });
+
+      drinkingColumns.forEach(function(col, k) {
+        var datum = parseFloat(row[col]);
+        drinkingNums.push(datum);
+      });
+
+      totalColumns.forEach(function(col, k) {
+        var datum = parseFloat(row[col]);
+        totalNums.push(datum);
+      });
+
+      var item = {
+        name: row['State'],
+        drunkNums: drunkNums,
+        drinkingNums: drinkingNums,
+        totalNums: totalNums
+      }
+      items[id] = item;
+
+    });
+
+    return items;
+  }
+
+  function updateData(year) {
+    currentYear = year;
+    var title = d3.select('#year').html(currentYear);
+
+    states
+      .transition()
+         .duration(750)
+         //.delay(function(d, i) { return i * 2; })
+         .attr("fill", getFill);
+  }
+
+  /* ****************************** */
+
+  function roundHalf(num) {
+      num = Math.round(num*2)/2;
+      return num;
+  }
+
+  function roundTenth(num) {
+      num = Math.round(num*10)/10;
+      return num;
+  }
+
+
+</script>
